@@ -1,4 +1,10 @@
 # Autonomous Warehouse Mobile Robot
+![ROS2](https://img.shields.io/badge/ROS2-Jazzy-blue?style=for-the-badge&logo=ros)
+![Nav2](https://img.shields.io/badge/Nav2-Navigation-green?style=for-the-badge)
+![Gazebo](https://img.shields.io/badge/Gazebo-Harmonic-orange?style=for-the-badge)
+![SLAM](https://img.shields.io/badge/SLAM-Toolbox-lightgrey?style=for-the-badge)
+![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge)
 
 Autonomous multi-waypoint navigation for a simulated TurtleBot3 Burger
 in a Gazebo warehouse, built on ROS 2 Jazzy, SLAM Toolbox, AMCL, and
