@@ -668,7 +668,7 @@ completion.
 ## Assumptions / Items Not Verified
 
 The following were not provided in the source material and are marked
-`[VERIFY FROM EXISTING PROJECT]` throughout this repository rather than
+throughout this repository rather than
 invented:
 
 - The exact package/launch-file name that brings up the Gazebo
