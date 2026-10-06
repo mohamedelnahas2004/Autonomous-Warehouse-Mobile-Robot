@@ -663,25 +663,6 @@ completion.
 - Capture the real screenshots and demonstration video referenced in
   Sections 23–24.
 
----
 
-## Assumptions / Items Not Verified
 
-The following were not provided in the source material and are marked
-throughout this repository rather than
-invented:
 
-- The exact package/launch-file name that brings up the Gazebo
-  warehouse world and TurtleBot3 (a name of
-  `warehouse_storage_launch.launch.py` is used as a placeholder per
-  the given instructions, but the containing package is unknown).
-- Whether Robot State Publisher is started by that same launch file or
-  separately.
-- The real `resolution`/`origin`/threshold values for
-  `warehouse_map.yaml`, and the actual `warehouse_map.pgm` image.
-- Tuned parameter values for `planner_server.yaml`,
-  `controller_server.yaml`, `behavior_server.yaml`, and
-  `bt_navigator.yaml` (standard Nav2 Jazzy defaults are used instead).
-- Whether the physical/simulated warehouse confirms the provisional
-  waypoint yaw values in Section 17.
-- Real screenshots and a demonstration video link.
