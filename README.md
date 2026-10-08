@@ -1,668 +1,332 @@
 # Autonomous Warehouse Mobile Robot
+
 ![ROS2](https://img.shields.io/badge/ROS2-Jazzy-blue?style=for-the-badge&logo=ros)
 ![Nav2](https://img.shields.io/badge/Nav2-Navigation-green?style=for-the-badge)
 ![Gazebo](https://img.shields.io/badge/Gazebo-Harmonic-orange?style=for-the-badge)
 ![SLAM](https://img.shields.io/badge/SLAM-Toolbox-lightgrey?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
-![Status](https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge)
 
-Autonomous multi-waypoint navigation for a simulated TurtleBot3 Burger
-in a Gazebo warehouse, built on ROS 2 Jazzy, SLAM Toolbox, AMCL, and
-Nav2, with a custom waypoint mission system.
+Autonomous multi-waypoint navigation for a simulated TurtleBot3 Burger in a
+Gazebo warehouse, built on ROS 2 Jazzy, SLAM Toolbox, AMCL and Nav2, with a
+custom waypoint-mission package that sequences the goals and shows them in RViz2.
 
-## 1. Project Overview
+![Gazebo warehouse](image/world.png)
 
-The robot maps a simulated warehouse with SLAM Toolbox, localizes on
-the saved map with AMCL, and then autonomously visits a fixed set of
-warehouse stations using Nav2 for path planning and control. A custom
-ROS 2 package (`warehouse_waypoints`) sequences the mission, sends
-goals to Nav2, and visualizes the waypoints in RViz2.
+## 1. Overview
 
-Data flow:
+1. The warehouse is mapped once with **SLAM Toolbox** and the map is saved.
+2. **AMCL** localizes the robot on that saved map.
+3. **Nav2** plans and drives the robot to goals.
+4. **`warehouse_waypoints`** sends a fixed sequence of goals to Nav2 and publishes
+   RViz markers (blue = waiting, green = current goal).
 
 ```
-Gazebo Warehouse
-      ↓
-TurtleBot3 Burger
-      ↓
-Sensors / Odometry / TF
-      ↓
-SLAM Toolbox
-      ↓
-Warehouse Map
-      ↓
-AMCL Localization
-      ↓
-Nav2
-      ↓
-Waypoint Mission
-      ↓
-Autonomous Navigation
+Gazebo warehouse + TurtleBot3  →  /scan, /odom, /tf
+        →  SLAM Toolbox (once)  →  warehouse_map.pgm / .yaml
+        →  AMCL (map → odom)  →  Nav2  →  warehouse_waypoints mission
 ```
 
 ## 2. Mission
 
 ```
-Home → Loading → Storage → Shipping → Home
+Home → Loading → (wait 30 s) → Storage → Shipping → Home
 ```
 
-The robot starts at **Home**. Home is the initial position and is
-**not** sent as a navigation goal itself — the first goal is Loading.
+Home is the start pose (AMCL's initial pose is Home) and is only used as the
+**final** goal; the first goal sent is Loading. If any goal fails, the mission
+aborts and the node exits with code 1.
 
-1. Start at Home.
-2. Navigate to Loading.
-3. Wait 30 seconds at Loading.
-4. Navigate to Storage.
-5. Navigate to Shipping.
-6. Return to Home.
-7. Mission complete.
-
-## 3. Technologies
-
-| Component        | Version / Detail                     |
-|-------------------|--------------------------------------|
-| ROS 2             | Jazzy                                |
-| Simulator         | Gazebo Harmonic                      |
-| Robot             | TurtleBot3 Burger with camera (`turtlebot3_burger_cam`) |
-| Mapping           | SLAM Toolbox                         |
-| Localization      | AMCL                                 |
-| Navigation        | Nav2                                 |
-| Visualization     | RViz2                                |
-| Mission logic     | Custom `warehouse_waypoints` package |
-
-## 4. System Architecture
+## 3. Repository structure
 
 ```
-AMCL
- ↓
-TF map → odom
- ↓
-Costmaps (global + local)
- ↓
-Planner Server
- ↓
-Controller Server
- ↓
-Behavior Server
- ↓
-BT Navigator
- ↓
-/cmd_vel
- ↓
-TurtleBot3
-```
-
-- **Global Costmap** — a map-frame costmap built from the static
-  warehouse map plus currently sensed obstacles; used for global
-  planning.
-- **Local Costmap** — a small rolling window around the robot in the
-  odom frame, used for short-horizon obstacle avoidance.
-- **Global Planner (Planner Server)** — computes a path from the
-  robot's current pose to the goal across the global costmap.
-- **Local Controller (Controller Server)** — follows the global path
-  while reacting to the local costmap, producing `/cmd_vel` commands.
-- **Behavior Server** — runs recovery behaviors (spin, back up, wait,
-  drive on heading) when navigation gets stuck.
-- **BT Navigator** — a behavior tree that orchestrates planning,
-  control, and recovery for each `navigate_to_pose` goal.
-
-## 5. Repository Structure
-
-```
-warehouse-waypoint-nav-MohamedAbdElaal/
-│
-├── robot_navigation/
+Autonomous-Warehouse-Mobile-Robot/
+├── robot_localizition/            # ament_cmake – Nav2 + AMCL setup (name spelling is intentional)
 │   ├── config/
 │   │   ├── amcl.yaml
-│   │   ├── planner_server.yaml
-│   │   ├── controller_server.yaml
+│   │   ├── planner_server.yaml       # planner + GLOBAL costmap
+│   │   ├── controller_server.yaml    # DWB controller + LOCAL costmap
 │   │   ├── behavior_server.yaml
 │   │   └── bt_navigator.yaml
 │   ├── launch/
-│   │   └── nav2_bringup.launch.py
-│   ├── maps/
+│   │   ├── amcl.launch.py            # map_server + AMCL only
+│   │   └── nav2_bringup.launch.py    # map_server + AMCL + full Nav2
+│   ├── map/
 │   │   ├── warehouse_map.yaml
-│   │   └── warehouse_map.pgm            
-│   ├── rviz/
-│   │   └── navigation.rviz
+│   │   └── warehouse_map.pgm
+│   ├── rviz/navigation.rviz
 │   ├── CMakeLists.txt
 │   └── package.xml
 │
-├── warehouse_waypoints/
-│   ├── resource/
-│   │   └── warehouse_waypoints
+├── warehouse_waypoints/           # ament_python – mission logic
 │   ├── warehouse_waypoints/
-│   │   ├── config/
-│   │   │   └── waypoints.py
-│   │   ├── markers/
-│   │   │   └── waypoint_marker_publisher.py
-│   │   ├── navigation/
-│   │   │   └── mission_planner.py
-│   │   ├── nodes/
-│   │   │   └── waypoint_mission_node.py
-│   │   └── utils/
-│   │       └── geometry.py
+│   │   ├── config/waypoints.py          # waypoints, mission order, wait times
+│   │   ├── markers/waypoint_marker_publisher.py
+│   │   ├── navigation/mission_planner.py
+│   │   ├── nodes/waypoint_mission_node.py   # entry point
+│   │   └── utils/geometry.py            # yaw → quaternion, Waypoint → PoseStamped
+│   ├── test/
+│   ├── resource/
 │   ├── package.xml
-│   └── setup.py
+│   ├── setup.py
+│   └── setup.cfg
 │
-├── images/
-├── .gitignore
+├── image/                         # screenshots used in this README
+├── LICENSE
 └── README.md
 ```
 
-This repository assumes an existing localization package,
-**`robot_localizition`** (spelling intentional — do not rename), is
-also present in the workspace `src/` alongside these two packages.
-Its structure and `CMakeLists.txt` are preserved unchanged:
+> **Not included in this repo:** the Gazebo warehouse world and the
+> `turtlebot3_burger_cam` robot spawn. They come from a separate simulation
+> package that you launch yourself (see Section 6).
 
-```
-robot_localizition/
-├── CMakeLists.txt
-├── config/
-├── include/
-├── launch/
-├── map/
-├── package.xml
-├── README.md
-├── rviz/
-└── src/
-```
+## 4. Requirements
 
-## 6. Requirements
-
-- ROS 2 Jazzy
-- Gazebo Harmonic
-- Nav2 (`nav2_bringup`, `nav2_amcl`, `nav2_map_server`, `nav2_planner`,
+- ROS 2 Jazzy and Gazebo Harmonic
+- Nav2: `nav2_bringup`, `nav2_amcl`, `nav2_map_server`, `nav2_planner`,
   `nav2_controller`, `nav2_behaviors`, `nav2_bt_navigator`,
-  `nav2_lifecycle_manager`)
-- SLAM Toolbox
-- TurtleBot3 packages providing the `turtlebot3_burger_cam` model
-  `[VERIFY FROM EXISTING PROJECT]`
-- `rviz2`
-- Python 3 / `rclpy`
+  `nav2_lifecycle_manager`, `nav2_simple_commander`
+- `dwb_core` (local planner) and `nav2_navfn_planner` (global planner) – installed with Nav2
+- SLAM Toolbox (only needed to re-map the warehouse)
+- TurtleBot3 packages / a simulation package that provides the Gazebo warehouse and
+  the `turtlebot3_burger_cam` model
+- `rviz2`, Python 3, `rclpy`
 
-## 7. Workspace Setup
+## 5. Build
 
-The workspace is:
-
-```
-~/workspaces/nav_ws
-```
-
-Packages:
-
-```
-robot_localizition
-warehouse_waypoints
-robot_navigation
-```
-
-Verify with:
+Clone into the `src/` folder of your workspace (for example `~/workspaces/nav_ws`):
 
 ```bash
+cd ~/workspaces/nav_ws/src
+git clone https://github.com/mohamedelnahas2004/Autonomous-Warehouse-Mobile-Robot.git
+
 cd ~/workspaces/nav_ws
-colcon list
-```
-
-Expected:
-
-```
-robot_localizition      src/robot_localizition
-warehouse_waypoints     src/warehouse_waypoints
-robot_navigation        src/robot_navigation
-```
-
-## 8. Build Instructions
-
-```bash
 source /opt/ros/jazzy/setup.bash
-cd ~/workspaces/nav_ws
-colcon build --symlink-install
+colcon build --symlink-install --packages-select robot_localizition warehouse_waypoints
 source install/setup.bash
 ```
 
-Verify:
+Check that both packages are found:
 
 ```bash
-ros2 pkg list | grep -E "robot_localizition|warehouse_waypoints|robot_navigation"
+ros2 pkg list | grep -E "robot_localizition|warehouse_waypoints"
 ```
 
-**Rebuild after:**
-- changing `package.xml`
-- changing `setup.py`
-- changing `CMakeLists.txt`
-- adding or installing launch files
-- changing installed configuration files
-- changing executable entry points
+Rebuild after changing a `package.xml`, `setup.py`, `CMakeLists.txt`, launch files,
+installed config/map files, or entry points.
 
-## 9. Launching the Warehouse Simulation
+## 6. Run the full mission
 
-Launch Gazebo Harmonic with the warehouse world and the TurtleBot3
-Burger (with camera):
+Source ROS and your workspace in every terminal:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
 source ~/workspaces/nav_ws/install/setup.bash
-
-ros2 launch <warehouse_simulation_package> warehouse_storage_launch.launch.py
 ```
 
-> `[VERIFY FROM EXISTING PROJECT]` — the exact launch package and file
-> name for the Gazebo warehouse world were not confirmed for this
-> write-up. If your project already has a launch file named
-> `warehouse_storage_launch.launch.py`, use that exact name and
-> package; otherwise substitute your actual launch file here.
+| Terminal | What | Command |
+|---|---|---|
+| 1 | Gazebo warehouse + TurtleBot3 (from your simulation package, **not in this repo**) | `ros2 launch <your_simulation_package> <your_warehouse_launch_file>` |
+| 2 | Map server, AMCL, Nav2 | `ros2 launch robot_localizition nav2_bringup.launch.py` |
+| 3 | RViz2 | `rviz2 -d $(ros2 pkg prefix robot_localizition)/share/robot_localizition/rviz/navigation.rviz` |
+| 4 | Mission | `ros2 run warehouse_waypoints waypoint_mission_node` |
 
-The robot model used is `turtlebot3_burger_cam`, described by
-`turtlebot3_burger.urdf` and published on `/robot_description` via
-Robot State Publisher.
+Notes:
 
-Key topics exposed by the simulation:
+- `amcl.yaml` sets the initial pose to `(0, 0, 0)` (`set_initial_pose: true`), which is
+  **Home**, so the robot should spawn at Home. If it does not, set the pose with
+  **2D Pose Estimate** in RViz and wait for the particle cloud to converge before
+  starting the mission.
+- The mission node calls `waitUntilNav2Active()`, so it waits for AMCL and the BT
+  navigator to be active before sending the first goal.
+- To run localization only (no planner/controller): `ros2 launch robot_localizition amcl.launch.py`.
 
-```
-/cmd_vel
-/odom
-/scan
-/scan/points
-/tf
-/robot_description
-```
-
-Gazebo model enable topic (previously used):
+### Expected mission log
 
 ```
-/model/turtlebot3_burger_cam/enable
+[waypoint_mission_node]: Setting 'Loading' as active goal.
+[waypoint_mission_node]: Reached 'Loading'.
+[waypoint_mission_node]: Waiting 30s at 'Loading'...
+[waypoint_mission_node]: Setting 'Storage' as active goal.
+[waypoint_mission_node]: Reached 'Storage'.
+[waypoint_mission_node]: Setting 'Shipping' as active goal.
+[waypoint_mission_node]: Reached 'Shipping'.
+[waypoint_mission_node]: Setting 'Home' as active goal.
+[waypoint_mission_node]: Reached 'Home'.
+[waypoint_mission_node]: Mission complete. Robot returned Home.
 ```
 
-## 10. SLAM Mapping
+On failure: `Failed to reach '<name>' (Nav2 result: ...). Aborting mission.`
 
-The warehouse map is generated with SLAM Toolbox, **not** AMCL. SLAM
-Toolbox builds the map while the robot moves; AMCL later localizes the
-robot **on** that already-built map. They are not interchangeable:
+## 7. Map
 
-- **SLAM Toolbox** → creates the map (mapping phase).
-- **AMCL** → localizes the robot on a saved, static map (localization
-  phase).
+`robot_localizition/map/warehouse_map.yaml`:
 
-Mapping workflow:
+| Field | Value |
+|---|---|
+| image | `warehouse_map.pgm` (614 × 310 px) |
+| resolution | 0.05 m/px (≈ 30.7 m × 15.5 m) |
+| origin | `[-8.515, -6.682, 0]` |
+| occupied / free threshold | 0.65 / 0.196 |
 
-1. Launch the Gazebo warehouse world (Section 9).
-2. Confirm the robot's TF tree and Robot State Publisher are running.
-3. Launch SLAM Toolbox in mapping mode:
-   ```bash
-   ros2 launch slam_toolbox online_async_launch.py use_sim_time:=true
-   ```
-   `[VERIFY FROM EXISTING PROJECT]` if a custom SLAM Toolbox launch
-   file/parameters file is used instead of the stock one.
-4. Open RViz2:
-   ```bash
-   rviz2
-   ```
-5. Set **Fixed Frame** to `map`.
-6. Add/enable displays for: Map, LaserScan, TF, RobotModel.
-7. Drive the robot (teleop or manual `/cmd_vel`) through the warehouse
-   until the map covers the whole environment.
-8. Verify the map is being built by watching the Map display update.
-9. Save the map (Section 11).
+All four waypoints fall on free cells of this map.
 
-## 11. Saving the Warehouse Map
+### Re-mapping with SLAM Toolbox
 
-Save the map published on `/map` using `map_saver_cli`:
+SLAM Toolbox **builds** the map; AMCL only **localizes** on an already saved map.
+
+```bash
+ros2 launch slam_toolbox online_async_launch.py use_sim_time:=true   # or your own SLAM Toolbox launch file
+rviz2                                                                  # Fixed Frame = map; add Map, LaserScan, TF, RobotModel
+```
+
+Drive the robot around the whole warehouse, then save and copy the map:
 
 ```bash
 ros2 run nav2_map_server map_saver_cli -f warehouse_map --ros-args -p save_map_timeout:=10000.0
+cp warehouse_map.yaml warehouse_map.pgm ~/workspaces/nav_ws/src/Autonomous-Warehouse-Mobile-Robot/robot_localizition/map/
 ```
 
-This produces:
+Rebuild afterwards. If you re-map, re-check the waypoint coordinates (Section 9) against the new map.
 
-```
-warehouse_map.yaml
-warehouse_map.pgm
-```
+![SLAM Toolbox mapping](image/map.png)
 
-Move both files into `robot_navigation/maps/`. `warehouse_map.yaml`
-references `warehouse_map.pgm` by filename and stores the map's
-resolution, origin, and occupancy thresholds — the `.pgm` is the
-actual occupancy-grid image, and the `.yaml` is only meaningful next
-to it.
+## 8. Navigation stack configuration
 
-> `[VERIFY FROM EXISTING PROJECT]` — the resolution/origin values
-> shipped in `robot_navigation/maps/warehouse_map.yaml` in this
-> repository are placeholders and must be replaced with the values
-> `map_saver_cli` actually prints for your saved warehouse map.
+All values below are taken from the YAML files in `robot_localizition/config/`
+(tuned for the TurtleBot3 Burger, `use_sim_time: true`).
 
-## 12. AMCL Localization
+**AMCL** (`amcl.yaml`)
 
-AMCL localizes the robot on the saved warehouse map. Configuration:
-`robot_navigation/config/amcl.yaml`.
+| Parameter | Value |
+|---|---|
+| Frames | `base_footprint`, `map`, `odom` |
+| Motion model | `nav2_amcl::DifferentialMotionModel` |
+| Particles | 500 – 2000 (`pf_err` 0.05, `pf_z` 0.99) |
+| Laser model | `likelihood_field`, `max_beams` 60, `laser_max_range` 12.0 m |
+| Update thresholds | `update_min_d` 0.25 m, `update_min_a` 0.2 rad |
+| Initial pose | `(0, 0, 0)` |
 
-Key frames:
+**Planning and control**
 
-| Parameter        | Value           | Purpose |
-|-------------------|-----------------|---------|
-| `base_frame_id`   | `base_footprint` | The robot's body frame. |
-| `global_frame_id` | `map`            | The fixed map frame AMCL localizes against. |
-| `odom_frame_id`   | `odom`           | The continuous, drifting odometry frame. |
+| Component | File | Setup |
+|---|---|---|
+| Global planner | `planner_server.yaml` | `NavfnPlanner` (Dijkstra, `use_astar: false`), tolerance 0.5 m, `allow_unknown: true` |
+| Global costmap | `planner_server.yaml` | frame `map`, layers: static, obstacle, denoise, inflation; `robot_radius` 0.1 |
+| Local controller | `controller_server.yaml` | `DWBLocalPlanner` at 10 Hz, max 0.22 m/s linear, 1.0 rad/s angular |
+| Goal checker | `controller_server.yaml` | `xy_goal_tolerance` 0.25 m, `yaw_goal_tolerance` 0.25 rad |
+| Local costmap | `controller_server.yaml` | frame `odom`, rolling window 3 × 3 m, layers: obstacle, denoise, inflation |
+| Inflation (both) | — | radius 0.5 m, cost scaling 5.0 |
+| Behaviors | `behavior_server.yaml` | spin, backup, drive_on_heading, wait, assisted_teleop |
+| BT Navigator | `bt_navigator.yaml` | `navigate_to_pose`, `navigate_through_poses` |
 
-Key topics: `scan_topic: scan`, `map_topic: map`.
+`nav2_bringup.launch.py` starts `map_server`, `amcl`, `planner_server`,
+`controller_server`, `behavior_server`, `bt_navigator` and a lifecycle manager that
+activates them. Plain `Twist` is used on `/cmd_vel` (`enable_stamped_cmd_vel: false`).
 
-Parameter notes:
+![AMCL particle cloud](image/amcl.png)
+![Nav2 navigating](image/nav_2.png)
 
-- **`DifferentialMotionModel`** — the odometry motion model for a
-  differential-drive robot (TurtleBot3 Burger), used to predict how
-  particles move between updates.
-- **`min_particles` / `max_particles`** — bound the particle filter's
-  population (500–2000): the pose belief is represented by this many
-  weighted particles.
-- **`pf_err` / `pf_z`** — control KLD-sampling: with probability
-  `pf_z` (0.99), the estimated particle distribution stays within
-  `pf_err` (0.05) of the true distribution, letting the filter shrink
-  the particle count once it's confident.
-- **`likelihood_field`** — the laser sensor model; scores each scan
-  point against a precomputed likelihood field derived from the map,
-  which is computationally cheaper than full ray-casting.
-- **`laser_max_range` (3.5 m)** — the maximum laser range used for
-  localization updates.
+## 9. Waypoints
 
-Initializing the robot's pose in RViz2:
+Defined only in `warehouse_waypoints/warehouse_waypoints/config/waypoints.py`
+(map frame):
 
-1. Set the RViz2 **Fixed Frame** to `map`.
-2. Click **2D Pose Estimate**.
-3. Click the robot's approximate real location on the map.
-4. Drag to set the robot's orientation.
-5. Wait for the AMCL particle cloud (`/particle_cloud`) to converge
-   around a single tight cluster.
+| Waypoint | x (m) | y (m) | yaw (rad) |
+|---|---|---|---|
+| Home | 0.0 | 0.0 | 0.0 |
+| Loading | 7.782054 | 7.420773 | 0.0 |
+| Storage | 20.000935 | -2.415623 | -1.5708 |
+| Shipping | -5.930928 | -5.406363 | 3.1416 |
 
-## 13. Nav2 Navigation
-
-Nav2 configuration files live in `robot_navigation/config/`:
-
-```
-amcl.yaml
-planner_server.yaml
-controller_server.yaml
-behavior_server.yaml
-bt_navigator.yaml
+```python
+MISSION_ORDER = ['Loading', 'Storage', 'Shipping', 'Home']
+WAIT_DURATIONS_SEC = {'Loading': 30.0}
 ```
 
-Bring everything up with:
+Orientation is stored as yaw and converted with `qz = sin(yaw/2)`, `qw = cos(yaw/2)`
+(planar navigation). The yaw values are provisional and have not been checked against
+the physical layout of the warehouse. To record a real pose at a station, run
+`ros2 topic echo /amcl_pose --once`.
 
-```bash
-ros2 launch robot_navigation nav2_bringup.launch.py
-```
-
-This launches the map server, AMCL, planner server, controller
-server, behavior server, and BT navigator, and brings them to the
-`active` lifecycle state via the lifecycle manager.
-
-> `[VERIFY FROM EXISTING PROJECT]` — `planner_server.yaml`,
-> `controller_server.yaml`, `behavior_server.yaml`, and
-> `bt_navigator.yaml` in this repository use standard Nav2 (Jazzy)
-> default parameters as a documented starting point, since project-
-> specific tuned values were not provided. Only `amcl.yaml` reflects
-> exact values confirmed for this project. Re-tune the other four
-> against the real warehouse map/environment before treating them as
-> final.
-
-## 14. RViz Configuration
-
-Configuration file: `robot_navigation/rviz/navigation.rviz`.
-**Fixed Frame:** `map`.
-
-Displays:
-
-| # | Display | Topic |
-|---|---------|-------|
-| 1 | Grid | — |
-| 2 | Map | `/map` |
-| 3 | RobotModel | `/robot_description` |
-| 4 | TF | — |
-| 5 | LaserScan | `/scan` |
-| 6 | Global Costmap | `/global_costmap/costmap` |
-| 7 | Local Costmap | `/local_costmap/costmap` |
-| 8 | Global Plan | `/plan` |
-| 9 | Local Plan | `/local_plan` |
-| 10 | ParticleCloud | `/particle_cloud` |
-| 11 | Waypoints | `/waypoint_markers` |
-
-Tools enabled: **2D Pose Estimate**, **2D Goal Pose**, **Publish
-Point**.
-
-Waypoint visualization uses `rviz_default_plugins/MarkerArray` on
-`/waypoint_markers` with Fixed Frame `map`.
-
-## 15. Waypoint System
-
-Waypoint coordinates are stored separately from mission logic, in
-`warehouse_waypoints/warehouse_waypoints/config/waypoints.py` — the
-mission node never hard-codes coordinates.
-
-Module responsibilities:
+### Code structure
 
 | Module | Responsibility |
-|--------|-----------------|
-| `config/waypoints.py` | Waypoint definitions and mission order. |
-| `markers/waypoint_marker_publisher.py` | Publishes the `MarkerArray` visualization. |
-| `navigation/mission_planner.py` | Mission sequencing and goal-pose construction. |
-| `nodes/waypoint_mission_node.py` | ROS 2 node: talks to Nav2, drives the mission. |
-| `utils/geometry.py` | Yaw ↔ quaternion conversion. |
+|---|---|
+| `config/waypoints.py` | Data only: waypoints, mission order, wait durations |
+| `markers/waypoint_marker_publisher.py` | Builds and publishes the `MarkerArray` on `/waypoint_markers` |
+| `navigation/mission_planner.py` | Sends goals through Nav2 `BasicNavigator`, waits for results, handles the 30 s wait |
+| `nodes/waypoint_mission_node.py` | Entry point (`waypoint_mission_node`): wires everything and runs the mission once |
+| `utils/geometry.py` | Yaw → quaternion and `Waypoint` → `PoseStamped` |
 
-Marker color convention on `/waypoint_markers`:
+## 10. RViz
 
-- **BLUE** — inactive waypoint
-- **GREEN** — the waypoint currently being navigated to
+Config: `robot_localizition/rviz/navigation.rviz`, Fixed Frame `map`.
 
-## 16. Waypoint Coordinates
+| Display | Topic |
+|---|---|
+| Map | `/map` |
+| RobotModel | `/robot_description` |
+| LaserScan | `/scan` |
+| Global Costmap | `/global_costmap/costmap` |
+| Local Costmap | `/local_costmap/costmap` |
+| Global Plan | `/plan` |
+| Local Plan | `/local_plan` |
+| ParticleCloud | `/particle_cloud` |
+| Waypoints (MarkerArray) | `/waypoint_markers` |
 
-| Waypoint | x | y | z |
-|----------|---|---|---|
-| Home     | 0.0 | 0.0 | 0.0 |
-| Loading  | 7.782053842839245 | 7.420772652392393 | 0.0 |
-| Storage  | 20.000934662165207 | -2.415622611057596 | 0.0 |
-| Shipping | -5.930928476565102 | -5.406362903539103 | 0.0 |
+Plus Grid and TF. Tools: 2D Pose Estimate, 2D Goal Pose, Publish Point.
 
-All orientations use `qz = sin(yaw / 2)`, `qw = cos(yaw / 2)`, with
-`qx = qy = 0` (planar navigation only).
+Waypoint markers: **blue** = waypoint not active, **green** = current goal. They are
+published by the mission node, so they appear only after the node has started and
+Nav2 is active.
 
-## 17. Waypoint Orientations
+![Waypoint markers 1](image/Mission_1.png)
+![Waypoint markers 2](image/Mission_2.png)
+![Waypoint markers 3](image/Mission_3.png)
+![Waypoint markers 4](image/Mission_4.png)
 
-| Waypoint | Starting yaw (rad) |
-|----------|---------------------|
-| Home     | 0.0 |
-| Loading  | 0.0 |
-| Storage  | -1.5708 |
-| Shipping | 3.1416 |
-
-**These yaw values are provisional.** They have not been verified
-against the actual warehouse map layout and should not be described
-as confirmed physical orientations until checked in RViz against the
-saved map.
-
-## 18. Mission Sequence
-
-```
-Home (start) → Loading → wait 30s → Storage → Shipping → Home
-```
-
-`Home` is only the start pose and the final return goal — it is not
-sent as the first navigation target.
-
-## 19. Running the Complete System
-
-Full localization/navigation conceptual workflow:
-
-1. Start Gazebo.
-2. Start Robot State Publisher / robot TF.
-3. Start AMCL.
-4. Start Nav2.
-5. Start RViz2.
-6. Set RViz Fixed Frame to `map`.
-7. Verify the saved map loaded correctly.
-8. Use **2D Pose Estimate** to set the robot's initial pose.
-9. Wait for the AMCL particle cloud to converge.
-10. Verify TF: `map → odom → base_footprint`.
-11. Verify `/scan` data is flowing.
-12. Verify global/local costmaps are populated.
-13. Verify Nav2's lifecycle nodes are active.
-14. Start the waypoint mission.
-
-Multi-terminal launch sequence (source both underlays in every
-terminal first):
+## 11. Tests
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source ~/workspaces/nav_ws/install/setup.bash
+cd ~/workspaces/nav_ws
+colcon test --packages-select warehouse_waypoints
+colcon test-result --verbose
 ```
 
-| Terminal | Command |
-|----------|---------|
-| 1 | `ros2 launch <warehouse_simulation_package> warehouse_storage_launch.launch.py` — Gazebo + TurtleBot3 `[VERIFY FROM EXISTING PROJECT]` |
-| 2 | Robot State Publisher / robot TF (often started by Terminal 1's launch file — verify) |
-| 3 | `ros2 launch robot_navigation nav2_bringup.launch.py` — AMCL + Nav2 |
-| 4 | `rviz2 -d $(ros2 pkg prefix robot_navigation)/share/robot_navigation/rviz/navigation.rviz` |
-| 5 | `ros2 run warehouse_waypoints waypoint_mission` |
+Included: three unit tests for the marker colors (`test_waypoint_marker_publisher.py`)
+plus the standard ament copyright, flake8 and pep257 checks.
 
-> Note: `nav2_bringup.launch.py` in this repository brings up AMCL
-> and the core Nav2 servers together (Section 13), so Terminals 3 and
-> 4 from the original outline are combined here into one launch.
+## 12. Troubleshooting
 
-## 20. Terminal Output
+- **Markers not visible in RViz** – check the mission node is running, then
+  `ros2 topic echo /waypoint_markers`, and make sure RViz has a `MarkerArray` display on
+  that topic with Fixed Frame `map`.
+- **Nav2 never becomes active / mission waits forever** – check AMCL has a pose
+  (set the initial pose) and `ros2 lifecycle get /amcl`, `/bt_navigator`.
+- **Check TF** – `ros2 run tf2_ros tf2_echo map base_footprint`, or
+  `ros2 run tf2_tools view_frames`.
+- **Do not put a `package.xml` / `CMakeLists.txt` at the repo or workspace root** –
+  colcon would treat the root as a package and fail on missing `launch/` folders.
+- **`cp: cannot stat ...` when copying map files** – the source path does not exist;
+  `ls` it first.
+- **Package name errors** – package names and installed executable names must stay
+  consistent, or `ros2 run` / `ros2 launch` cannot find them. Keep the
+  `robot_localizition` spelling.
 
-Example mission output:
+## 13. Demo video
 
-```
-==================================================
-WAREHOUSE AUTONOMOUS MISSION
-==================================================
+[Watch the demonstration](https://drive.google.com/file/d/16PXEJtR36JUpgdENpoLA09O_U8T13w_F/view?usp=sharing)
 
-Mission: Home -> Loading -> Storage -> Shipping -> Home
+## 14. Known limitations / future work
 
-[INFO] Waiting for Nav2 'navigate_to_pose' action server...
-[INFO] Nav2 action server available. Starting mission.
-[INFO] Navigating to Loading...
-[INFO] Loading reached.
-[INFO] Waiting 30 seconds...
-[INFO] Navigating to Storage...
-[INFO] Storage reached.
-[INFO] Navigating to Shipping...
-[INFO] Shipping reached.
-[INFO] Navigating to Home...
-[INFO] Home reached.
-==================================================
-MISSION COMPLETE
-==================================================
-```
+- The Gazebo warehouse launch is outside this repo; document or add the package.
+- Waypoint yaw values need to be verified against the real layout.
+- No unit tests yet for `mission_planner.py` (only the marker publisher is tested).
+- The mission runs once and aborts on the first failed goal (no retry).
+- Package metadata (`description`, `maintainer`, `license`) in both `package.xml` files
+  still contains placeholders.
 
-## 21. Verification and Debugging
+## License
 
-```bash
-ros2 topic list
-ros2 topic echo /map
-ros2 topic echo /scan
-ros2 topic echo /particle_cloud
-ros2 topic echo /waypoint_markers
-ros2 topic echo /cmd_vel
-
-ros2 node list
-ros2 action list
-ros2 topic info /waypoint_markers
-```
-
-TF checks:
-
-```bash
-ros2 run tf2_ros tf2_echo map base_footprint
-ros2 run tf2_tools view_frames
-```
-
-## 22. Problems Encountered and Solutions
-
-**Problem 1 — accidental root-level package files.**
-`CMakeLists.txt` and `package.xml` were accidentally placed at the
-workspace root, causing colcon/CMake to treat the root as a package
-and fail with errors referencing a missing `/root/workspaces/nav_ws/launch`
-directory.
-*Solution:* remove the stray root-level files, keep package files only
-inside the actual packages, then rebuild clean:
-```bash
-rm -rf build install log
-colcon build --symlink-install
-```
-
-**Problem 2 — package rename confusion.**
-Confusion arose between `slam_toolbox` and a renamed
-`my_slam_toolbox`. ROS 2 package names and their installed executable
-names must stay consistent, or `ros2 run`/`ros2 launch` will fail to
-find the expected package.
-
-**Problem 3 — map files accidentally deleted in VS Code.**
-Recovery options, in order of ease:
-1. `Ctrl+Z` in the editor.
-2. VS Code's Timeline / local history panel, if available.
-3. `git` history, if the map was already committed.
-4. As a last resort, regenerate the map from scratch with SLAM
-   Toolbox (Section 10).
-
-**Problem 4 — incorrect map copy path.**
-Copy commands failed with `cp: cannot stat ...` because the source
-path did not actually exist. Always verify the source file exists
-(`ls <path>`) before copying map files into `robot_navigation/maps/`.
-
-**Problem 5 — RViz waypoint markers not appearing.**
-Troubleshooting steps:
-```bash
-ros2 topic list | grep waypoint
-ros2 topic echo /waypoint_markers
-```
-- Confirm `waypoint_mission` node is actually running.
-- Confirm RViz has a `rviz_default_plugins/MarkerArray` display
-  subscribed to `/waypoint_markers`.
-- Confirm RViz's Fixed Frame is `map`.
-
-## 23. Screenshots
-
-> Screenshots have not yet been captured for this write-up. Placeholders are referenced below — replace `images/*.png` with real captures from your own run before publishing.
-
-### SLAM Toolbox building the warehouse map
-<img width="567" height="421" alt="map" src="https://github.com/user-attachments/assets/8f698a3c-0797-41e5-b62c-355d8bbf3e5e" />
-
-### AMCL particle cloud converged
-<img width="562" height="418" alt="amcl" src="https://github.com/user-attachments/assets/741f6998-17a2-4e16-aaf3-fe4de5c3363c" />
-
-### Nav2 driving the robot toward a goal
-<img width="570" height="421" alt="nav_2" src="https://github.com/user-attachments/assets/362284a7-0926-400d-8085-f3ac9b920721" />
-
-### Blue/green waypoint markers in RViz
-<img width="561" height="421" alt="Mission_4" src="https://github.com/user-attachments/assets/f39d01f4-d787-4a4e-8b5f-67200cf6f21f" />
-<img width="563" height="425" alt="Mission_3" src="https://github.com/user-attachments/assets/be6c5e47-9b30-4b85-a923-10ec07787336" />
-<img width="561" height="421" alt="Mission_2" src="https://github.com/user-attachments/assets/bc7f6ecd-824c-4911-925b-261779929169" />
-<img width="547" height="378" alt="Mission_1" src="https://github.com/user-attachments/assets/c1dd61e6-5587-438c-92a6-77921291e62f" />
- 
-
-## 24. Demonstration Video
-
-(https://drive.google.com/file/d/16PXEJtR36JUpgdENpoLA09O_U8T13w_F/view?usp=sharing)
-
-The video should walk through: the Gazebo warehouse, robot startup,
-localization, RViz, Nav2, waypoint markers, arrival at Loading, the
-30-second wait, Storage, Shipping, the return to Home, and mission
-completion.
-
-## 25. Future Improvements
-
-- Tune `planner_server.yaml`, `controller_server.yaml`,
-  `behavior_server.yaml`, and `bt_navigator.yaml` against the actual
-  warehouse map instead of the Nav2 stock defaults currently in this
-  repository.
-- Confirm and record the exact Gazebo warehouse launch file name and
-  package.
-- Verify the waypoint yaw values (Section 17) against the real
-  warehouse layout.
-- Add automated tests for `mission_planner.py` and
-  `waypoint_marker_publisher.py`.
-- Capture the real screenshots and demonstration video referenced in
-  Sections 23–24.
-
-
-
+MIT – see [LICENSE](LICENSE).
 
